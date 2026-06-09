@@ -23,11 +23,16 @@ jobs:
       packages: write   # Necesario para publicar en ghcr.io
 
     outputs:
-      image_tag: ${{ steps.meta.outputs.version }}
+      # Usamos el SHA corto directamente para garantizar un tag único por commit
+      image_tag: ${{ steps.sha.outputs.short }}
 
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+
+      - name: Calcular SHA corto del commit
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Autenticación en GitHub Container Registry
         uses: docker/login-action@v3
@@ -44,7 +49,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             # Tag con el SHA corto del commit (trazabilidad)
-            type=sha,prefix=,format=short
+            type=raw,value=${{ steps.sha.outputs.short }}
             # Tag "latest" apunta siempre al último build de main
             type=raw,value=latest
 
@@ -85,5 +90,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add helm/mi-microservicio/values.yaml
-          git commit -m "ci: actualizar imagen a ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
-          git push
+          # Solo hace commit si hubo cambios reales en el tag
+          if git diff --cached --quiet; then
+            echo "El tag no cambió, nada que commitear."
+          else
+            git commit -m "ci: actualizar imagen a ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
+            git push
+          fi
