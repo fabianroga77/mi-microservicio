@@ -18,7 +18,7 @@ service:
   port: 80          # Puerto externo expuesto por el Service
   targetPort: 8000  # Puerto interno del contenedor (FastAPI)
 
-# Variables de entorno inyectadas al contenedor
+# Variables de entorno inyectadas al contenedo
 env:
   APP_ENV: "development"
 
