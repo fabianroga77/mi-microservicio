@@ -1,0 +1,24 @@
+# =============================================================
+# values-prod.yaml — override para entorno de producción
+# Uso: helm upgrade --install mi-microservicio ./helm/mi-microservicio \
+#        -f helm/mi-microservicio/values.yaml \
+#        -f helm/mi-microservicio/values-prod.yaml
+# =============================================================
+
+# Más réplicas para alta disponibilidad en producción
+replicaCount: 2
+
+image:
+  tag: "stable"
+
+env:
+  APP_ENV: "production"
+
+# Más recursos asignados en producción
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi

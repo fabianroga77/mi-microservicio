@@ -1,0 +1,47 @@
+# =============================================================
+# values.yaml — configuración por defecto (entorno: development)
+# Para sobreescribir en producción usar: values-prod.yaml
+# =============================================================
+
+replicaCount: 1
+
+image:
+  # ⚠️ Reemplazar TU_USUARIO con tu nombre de usuario de GitHub
+  repository: ghcr.io/fabianroga77/mi-microservicio
+  pullPolicy: IfNotPresent
+  # El pipeline de CI/CD actualiza este tag automáticamente con el SHA del commit
+  tag: "latest"
+
+# Nombre del servicio y configuración de puertos
+service:
+  type: ClusterIP
+  port: 80          # Puerto externo expuesto por el Service
+  targetPort: 8000  # Puerto interno del contenedor (FastAPI)
+
+# Variables de entorno inyectadas al contenedor
+env:
+  APP_ENV: "development"
+
+# Límites y solicitudes de recursos (buenas prácticas K8S)
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+# Probes de salud apuntando al endpoint /health del microservicio
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10

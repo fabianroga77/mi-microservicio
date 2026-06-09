@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mi-microservicio
+  # ArgoCD siempre despliega sus propios manifiestos en el namespace argocd
+  namespace: argocd
+spec:
+  # El proyecto por defecto agrupa las aplicaciones gestionadas por ArgoCD
+  project: default
+
+  source:
+    # ⚠️ Reemplazar con la URL real de tu repositorio GitHub
+    repoURL: https://github.com/fabianroga77/mi-microservicio.git
+    # Rama que ArgoCD monitorea para sincronización automática
+    targetRevision: main
+    # Ruta al chart de Helm dentro del repositorio
+    path: helm/mi-microservicio
+    helm:
+      # Archivo de valores base
+      valueFiles:
+        - values.yaml
+
+  destination:
+    # Cluster local de Kubernetes (Minikube)
+    server: https://kubernetes.default.svc
+    # Namespace donde se despliega el microservicio
+    namespace: mi-microservicio
+
+  syncPolicy:
+    automated:
+      # ArgoCD elimina recursos en K8S que ya no existen en Git
+      prune: true
+      # ArgoCD revierte cambios manuales en el cluster que no estén en Git
+      selfHeal: true
+    syncOptions:
+      # Crea el namespace automáticamente si no existe
+      - CreateNamespace=true

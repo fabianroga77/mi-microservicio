@@ -1,0 +1,89 @@
+name: CI/CD - Build, Push y Deploy
+
+# Disparador: se ejecuta en cada commit a la rama main
+on:
+  push:
+    branches:
+      - main
+
+env:
+  # GitHub Container Registry: no requiere Docker Hub, usa el token de GitHub
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/mi-microservicio
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Construir y publicar la imagen Docker
+  # ─────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Necesario para el commit del tag al final
+      packages: write   # Necesario para publicar en ghcr.io
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Autenticación en GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN viene incluido automáticamente, sin configuración extra
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extraer metadata para el tag de la imagen
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Tag con el SHA corto del commit (trazabilidad)
+            type=sha,prefix=,format=short
+            # Tag "latest" apunta siempre al último build de main
+            type=raw,value=latest
+
+      - name: Construir y publicar imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Actualizar el tag en values.yaml
+  # ArgoCD detecta el cambio en Git y sincroniza automáticamente
+  # ─────────────────────────────────────────────
+  update-helm-tag:
+    name: Update Helm Image Tag
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Actualizar tag de imagen en values.yaml
+        run: |
+          NEW_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          # Reemplaza el campo tag en values.yaml con el SHA del nuevo build
+          sed -i "s/  tag: .*/  tag: \"${NEW_TAG}\"/" helm/mi-microservicio/values.yaml
+          echo "Tag actualizado a: ${NEW_TAG}"
+
+      - name: Commit y push del nuevo tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/mi-microservicio/values.yaml
+          git commit -m "ci: actualizar imagen a ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
+          git push

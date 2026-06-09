@@ -1,0 +1,8 @@
+apiVersion: v2
+name: mi-microservicio
+description: Chart de Helm para desplegar el microservicio en Kubernetes
+type: application
+# Versión del chart (incrementar en cada cambio de configuración)
+version: 0.1.0
+# Versión de la aplicación desplegada
+appVersion: "1.0.0"

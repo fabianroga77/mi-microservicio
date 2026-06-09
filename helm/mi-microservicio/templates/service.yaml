@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mi-microservicio.fullname" . }}
+  labels:
+    {{- include "mi-microservicio.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  # El selector conecta este Service con los Pods del Deployment
+  selector:
+    {{- include "mi-microservicio.selectorLabels" . | nindent 4 }}
