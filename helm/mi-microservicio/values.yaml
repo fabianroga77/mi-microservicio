@@ -10,7 +10,7 @@ image:
   repository: ghcr.io/fabianroga77/mi-microservicio
   pullPolicy: IfNotPresent
   # El pipeline de CI/CD actualiza este tag automáticamente con el SHA del commit
-  tag: "latest"
+  tag: "c8fcb0f"
 
 # Nombre del servicio y configuración de puertos
 service:
