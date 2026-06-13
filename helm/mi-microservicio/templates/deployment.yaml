@@ -1,3 +1,4 @@
+# Deployment: le dice a K8S cuantos pods correr y con que imagen
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,18 +23,17 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
-          # Variables de entorno desde values.yaml
           env:
             - name: APP_ENV
               value: {{ .Values.env.APP_ENV | quote }}
-          # Probe de disponibilidad: K8S espera a que el pod esté listo antes de enviar tráfico
+          # readiness: el pod tiene que pasar esto antes de recibir trafico
           readinessProbe:
             httpGet:
               path: {{ .Values.readinessProbe.httpGet.path }}
               port: {{ .Values.readinessProbe.httpGet.port }}
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
-          # Probe de vida: K8S reinicia el pod si el servicio deja de responder
+          # liveness: si deja de responder, K8S mata el pod y crea uno nuevo
           livenessProbe:
             httpGet:
               path: {{ .Values.livenessProbe.httpGet.path }}

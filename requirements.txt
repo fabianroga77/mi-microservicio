@@ -1,2 +1,5 @@
+# Dependencias del microservicio
+# fastapi: la API
+# uvicorn: el servidor que corre la app (con extras para mejor rendimiento)
 fastapi==0.104.1
 uvicorn[standard]==0.24.0

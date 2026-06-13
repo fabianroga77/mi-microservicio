@@ -1,29 +1,37 @@
+# Pipeline CI/CD del trabajo K8S
+#
+# Se dispara con cada push a main. La idea es que nadie tenga que subir
+# la imagen a mano ni editar el tag en values.yaml:
+#
+#   push a main
+#     -> build + push imagen a ghcr.io (tag = SHA del commit)
+#     -> commit automatico actualizando values.yaml
+#     -> ArgoCD ve el cambio y despliega en el cluster
+#
+
 name: CI/CD - Build, Push y Deploy
 
-# Disparador: se ejecuta en cada commit a la rama main
 on:
   push:
     branches:
       - main
 
 env:
-  # GitHub Container Registry: no requiere Docker Hub, usa el token de GitHub
   REGISTRY: ghcr.io
+  # queda ghcr.io/usuario/mi-microservicio si el repo es de ese usuario
   IMAGE_NAME: ${{ github.repository_owner }}/mi-microservicio
 
 jobs:
-  # ─────────────────────────────────────────────
-  # JOB 1: Construir y publicar la imagen Docker
-  # ─────────────────────────────────────────────
+  # --- Job 1: construir la imagen y publicarla ---
   build-and-push:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # Necesario para el commit del tag al final
-      packages: write   # Necesario para publicar en ghcr.io
+      contents: write # el job 2 necesita pushear al repo
+      packages: write # publicar en ghcr.io
 
     outputs:
-      # Usamos el SHA corto directamente para garantizar un tag único por commit
+      # pasamos el tag al job 2 para que actualice values.yaml
       image_tag: ${{ steps.sha.outputs.short }}
 
     steps:
@@ -32,14 +40,15 @@ jobs:
 
       - name: Calcular SHA corto del commit
         id: sha
+        # tag unico por commit, ej: cb4154d — asi sabemos que codigo tiene la imagen
         run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Autenticación en GitHub Container Registry
+      - name: Autenticacion en GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          # GITHUB_TOKEN viene incluido automáticamente, sin configuración extra
+          # GITHUB_TOKEN ya viene en el workflow, no hay que crear secret aparte
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extraer metadata para el tag de la imagen
@@ -48,9 +57,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag con el SHA corto del commit (trazabilidad)
             type=raw,value=${{ steps.sha.outputs.short }}
-            # Tag "latest" apunta siempre al último build de main
             type=raw,value=latest
 
       - name: Construir y publicar imagen Docker
@@ -61,10 +68,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ─────────────────────────────────────────────
-  # JOB 2: Actualizar el tag en values.yaml
-  # ArgoCD detecta el cambio en Git y sincroniza automáticamente
-  # ─────────────────────────────────────────────
+  # --- Job 2: decirle a Helm que imagen usar ---
+  # ArgoCD lee values.yaml del repo; si el tag no cambia, no despliega nada nuevo
   update-helm-tag:
     name: Update Helm Image Tag
     runs-on: ubuntu-latest
@@ -81,7 +86,7 @@ jobs:
       - name: Actualizar tag de imagen en values.yaml
         run: |
           NEW_TAG="${{ needs.build-and-push.outputs.image_tag }}"
-          # Reemplaza el campo tag en values.yaml con el SHA del nuevo build
+          # sed reemplaza la linea "  tag: ..." en values.yaml
           sed -i "s/  tag: .*/  tag: \"${NEW_TAG}\"/" helm/mi-microservicio/values.yaml
           echo "Tag actualizado a: ${NEW_TAG}"
 
@@ -90,10 +95,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add helm/mi-microservicio/values.yaml
-          # Solo hace commit si hubo cambios reales en el tag
           if git diff --cached --quiet; then
-            echo "El tag no cambió, nada que commitear."
+            echo "El tag no cambio, nada que commitear."
           else
+            # [skip ci] para que este commit no vuelva a disparar el pipeline (loop infinito)
             git commit -m "ci: actualizar imagen a ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
             git push
           fi
