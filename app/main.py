@@ -1,5 +1,5 @@
 """
-mi-microservicio
+Core Banking Lite — microservicio bancario (trabajo K8S)
 
 Autores:
 - Jorge Eliecer Rojas
@@ -8,95 +8,53 @@ Autores:
 - Juan Velez
 - David Panesso
 
-Arquitectura de Software - Universidad de La Sabana
-Trabajo K8S (Docker, Helm, Kubernetes, ArgoCD)
+Arquitectura hexagonal:
+  domain/       entidades y reglas de negocio
+  application/  casos de uso
+  infrastructure/  FastAPI + persistencia JSON
 
-Esta es la API que corre dentro del contenedor. Kubernetes la consulta
-por /health para saber si el pod esta bien. El resto de endpoints son
-para probar que el despliegue quedo con la version y el entorno correctos.
+Persistencia en archivos JSON (DATA_DIR). Sin base de datos.
 """
 
-from fastapi import FastAPI, HTTPException
-import os
-import platform
-import time
+from contextlib import asynccontextmanager
 
-# Variables de entorno. APP_ENV la inyecta Helm desde values.yaml.
-# APP_VERSION no la pasamos desde Helm todavia, queda en 1.0.0 por defecto.
-APP_ENV = os.getenv("APP_ENV", "development")
-APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
-APP_NAME = "mi-microservicio"
+from fastapi import FastAPI
 
-# Guardamos cuando arranco el server para calcular uptime en /info
-START_TIME = time.time()
-
-app = FastAPI(
-    title="Mi Microservicio",
-    description="API del trabajo K8S - Arquitectura de Software",
-    version=APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
+from infrastructure.config import get_settings
+from infrastructure.web.dependencies import init_app
+from infrastructure.web.exception_handlers import register_exception_handlers
+from infrastructure.web.routers import clientes, cuentas, sistema, transacciones
 
 
-@app.get("/")
-def root():
-    """
-    Respuesta rapida para ver que el servicio esta arriba.
-    Devuelve nombre, version y entorno (development/production).
-    """
-    return {
-        "service": APP_NAME,
-        "version": APP_VERSION,
-        "env": APP_ENV,
-        "message": "Servicio activo",
-    }
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_app()
+    yield
 
 
-@app.get("/health")
-def health_check():
-    """
-    Lo usa Kubernetes en los probes (liveness y readiness).
-    Si esto deja de responder, K8S puede reiniciar el pod o dejar de mandarle trafico.
-    Tiene que ser liviano y no depender de bases de datos ni nada externo.
-    """
-    return {"status": "ok", "env": APP_ENV}
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(
+        title="Core Banking Lite",
+        description=(
+            "API de banco simulado para el trabajo de Arquitectura de Software. "
+            "Gestiona clientes, cuentas (ahorros/corriente) y transacciones en COP. "
+            "Los datos se guardan en JSON local (PVC en Kubernetes)."
+        ),
+        version=settings.app_version,
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    register_exception_handlers(app)
+
+    app.include_router(sistema.router)
+    app.include_router(clientes.router)
+    app.include_router(cuentas.router)
+    app.include_router(transacciones.router)
+
+    return app
 
 
-@app.get("/info")
-def info():
-    """
-    Info extra del contenedor: version de Python, OS, cuanto lleva corriendo.
-    Nos sirve para debuggear cuando algo se ve raro en el cluster.
-    """
-    uptime_seconds = round(time.time() - START_TIME, 1)
-
-    return {
-        "service": APP_NAME,
-        "version": APP_VERSION,
-        "env": APP_ENV,
-        "python_version": platform.python_version(),
-        "os": platform.system(),
-        "uptime_seconds": uptime_seconds,
-    }
-
-
-@app.get("/env/{variable}")
-def get_env_variable(variable: str):
-    """
-    Permite leer algunas variables de entorno desde afuera (para pruebas).
-    Solo dejamos APP_ENV y APP_VERSION — no exponemos secretos ni tokens.
-    """
-    allowed = {"APP_ENV", "APP_VERSION"}
-
-    if variable not in allowed:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Variable '{variable}' no esta disponible. Permitidas: {sorted(allowed)}",
-        )
-
-    value = os.getenv(variable)
-    if value is None:
-        raise HTTPException(status_code=404, detail=f"Variable '{variable}' no definida.")
-
-    return {"variable": variable, "value": value}
+app = create_app()

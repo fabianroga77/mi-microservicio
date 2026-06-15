@@ -25,14 +25,21 @@ env:
   # llega a la app como variable de entorno APP_ENV
   APP_ENV: "development"
 
+# PVC para que los JSON de clientes/cuentas/transacciones sobrevivan reinicios del pod
+persistence:
+  enabled: true
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /app/data
+
 resources:
   # limites del pod — en Minikube con poca RAM conviene dejarlo bajo
   limits:
     cpu: 200m
-    memory: 128Mi
+    memory: 256Mi
   requests:
     cpu: 100m
-    memory: 64Mi
+    memory: 128Mi
 
 # Kubernetes llama a /health cada X segundos para saber si el pod esta bien
 livenessProbe:

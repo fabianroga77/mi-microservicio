@@ -10,7 +10,8 @@
 #     -f helm/mi-microservicio/values-prod.yaml \
 #     --namespace mi-microservicio
 
-replicaCount: 2
+# Con PVC (ReadWriteOnce) conviene 1 replica — varios pods compiten por el mismo volumen
+replicaCount: 1
 
 image:
   # tiene que ser un tag que exista en ghcr (latest o un SHA que haya publicado el CI)
