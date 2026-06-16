@@ -1,14 +1,11 @@
 from dataclasses import dataclass
-from pathlib import Path
 
 from application.use_cases.clientes import ClienteUseCases
 from application.use_cases.cuentas import CuentaUseCases
 from application.use_cases.transacciones import TransaccionUseCases
-from infrastructure.config import get_settings
-from infrastructure.persistence.json_store import JsonStore
-from infrastructure.persistence.repositories.cliente_repo import JsonClienteRepository
-from infrastructure.persistence.repositories.cuenta_repo import JsonCuentaRepository
-from infrastructure.persistence.repositories.transaccion_repo import JsonTransaccionRepository
+from infrastructure.persistence.repositories.cliente_repo import MemoryClienteRepository
+from infrastructure.persistence.repositories.cuenta_repo import MemoryCuentaRepository
+from infrastructure.persistence.repositories.transaccion_repo import MemoryTransaccionRepository
 from infrastructure.seed.seed_data import seed_if_empty
 
 
@@ -22,14 +19,10 @@ class AppContainer:
 _container: AppContainer | None = None
 
 
-def build_container(data_dir: Path | None = None) -> AppContainer:
-    settings = get_settings()
-    base = data_dir or settings.data_dir
-    base.mkdir(parents=True, exist_ok=True)
-
-    cliente_repo = JsonClienteRepository(JsonStore(base / "clientes.json"))
-    cuenta_repo = JsonCuentaRepository(JsonStore(base / "cuentas.json"))
-    transaccion_repo = JsonTransaccionRepository(JsonStore(base / "transacciones.json"))
+def build_container() -> AppContainer:
+    cliente_repo = MemoryClienteRepository()
+    cuenta_repo = MemoryCuentaRepository()
+    transaccion_repo = MemoryTransaccionRepository()
 
     seed_if_empty(cliente_repo, cuenta_repo, transaccion_repo)
 

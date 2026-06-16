@@ -1,13 +1,12 @@
-# Pipeline CI/CD del trabajo K8S
-#
-# Se dispara con cada push a main. La idea es que nadie tenga que subir
-# la imagen a mano ni editar el tag en values.yaml:
+# Pipeline CI/CD completo
 #
 #   push a main
-#     -> build + push imagen a ghcr.io (tag = SHA del commit)
-#     -> commit automatico actualizando values.yaml
-#     -> ArgoCD ve el cambio y despliega en el cluster
+#     -> Job 1: tests + validacion Helm
+#     -> Job 2: build + push imagen a ghcr.io (tag = SHA)
+#     -> Job 3: commit automatico del tag en values.yaml
+#     -> ArgoCD despliega rolling update en el cluster
 #
+# Los commits con [skip ci] no disparan el pipeline (evita loop del bot)
 
 name: CI/CD - Build, Push y Deploy
 
@@ -15,23 +14,81 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  # queda ghcr.io/usuario/mi-microservicio si el repo es de ese usuario
   IMAGE_NAME: ${{ github.repository_owner }}/mi-microservicio
 
 jobs:
-  # --- Job 1: construir la imagen y publicarla ---
+
+  # --- Job 1: validar antes de construir ---
+  test:
+    name: Test y validacion
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Smoke tests de la API
+        working-directory: app
+        run: |
+          python - <<'EOF'
+          from fastapi.testclient import TestClient
+          from main import app
+
+          client = TestClient(app)
+
+          health = client.get("/health")
+          assert health.status_code == 200, health.text
+          assert health.json()["status"] == "ok"
+
+          clientes = client.get("/api/v1/clientes")
+          assert clientes.status_code == 200, clientes.text
+          assert clientes.json()["total"] >= 2
+
+          transfer = client.post(
+              "/api/v1/transacciones/transferencia",
+              json={
+                  "cuenta_origen_id": "seed-cuenta-001",
+                  "cuenta_destino_id": "seed-cuenta-002",
+                  "monto": 10000,
+              },
+          )
+          assert transfer.status_code == 201, transfer.text
+          print("Smoke tests OK")
+          EOF
+
+      - name: Validar chart de Helm
+        run: helm lint helm/mi-microservicio
+
+      - name: Verificar que el chart renderiza
+        run: helm template mi-microservicio helm/mi-microservicio --namespace mi-microservicio > /dev/null
+
+  # --- Job 2: construir y publicar imagen ---
   build-and-push:
     name: Build & Push Docker Image
+    needs: test
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write # el job 2 necesita pushear al repo
-      packages: write # publicar en ghcr.io
+      contents: write
+      packages: write
 
     outputs:
-      # pasamos el tag al job 2 para que actualice values.yaml
       image_tag: ${{ steps.sha.outputs.short }}
 
     steps:
@@ -40,7 +97,6 @@ jobs:
 
       - name: Calcular SHA corto del commit
         id: sha
-        # tag unico por commit, ej: cb4154d — asi sabemos que codigo tiene la imagen
         run: echo "short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Autenticacion en GitHub Container Registry
@@ -48,7 +104,6 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          # GITHUB_TOKEN ya viene en el workflow, no hay que crear secret aparte
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extraer metadata para el tag de la imagen
@@ -68,12 +123,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # --- Job 2: decirle a Helm que imagen usar ---
-  # ArgoCD lee values.yaml del repo; si el tag no cambia, no despliega nada nuevo
+  # --- Job 3: actualizar Helm para ArgoCD ---
   update-helm-tag:
     name: Update Helm Image Tag
-    runs-on: ubuntu-latest
     needs: build-and-push
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
@@ -86,7 +141,6 @@ jobs:
       - name: Actualizar tag de imagen en values.yaml
         run: |
           NEW_TAG="${{ needs.build-and-push.outputs.image_tag }}"
-          # sed reemplaza la linea "  tag: ..." en values.yaml
           sed -i "s/  tag: .*/  tag: \"${NEW_TAG}\"/" helm/mi-microservicio/values.yaml
           echo "Tag actualizado a: ${NEW_TAG}"
 
@@ -98,7 +152,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "El tag no cambio, nada que commitear."
           else
-            # [skip ci] para que este commit no vuelva a disparar el pipeline (loop infinito)
             git commit -m "ci: actualizar imagen a ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
             git push
           fi

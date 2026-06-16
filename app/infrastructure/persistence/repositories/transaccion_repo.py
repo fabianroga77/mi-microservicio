@@ -3,39 +3,23 @@ from typing import List, Optional
 from domain.enums import TipoTransaccion
 from domain.models.transaccion import Transaccion
 from domain.ports.transaccion_repository import TransaccionRepository
-from infrastructure.persistence.json_store import JsonStore
-from infrastructure.persistence.serializers import (
-    transaccion_from_dict,
-    transaccion_to_dict,
-)
 
 
-class JsonTransaccionRepository(TransaccionRepository):
-    def __init__(self, store: JsonStore):
-        self._store = store
+class MemoryTransaccionRepository(TransaccionRepository):
+    def __init__(self) -> None:
+        self._items: dict[str, Transaccion] = {}
 
     def save(self, transaccion: Transaccion) -> Transaccion:
-        data = transaccion_to_dict(transaccion)
-
-        def mutator(items):
-            updated = [data if i["id"] == transaccion.id else i for i in items]
-            if not any(i["id"] == transaccion.id for i in items):
-                updated.append(data)
-            return updated
-
-        self._store.update(mutator)
+        self._items[transaccion.id] = transaccion
         return transaccion
 
     def find_by_id(self, transaccion_id: str) -> Optional[Transaccion]:
-        for item in self._store.read_all():
-            if item["id"] == transaccion_id:
-                return transaccion_from_dict(item)
-        return None
+        return self._items.get(transaccion_id)
 
     def find_by_idempotency_key(self, key: str) -> Optional[Transaccion]:
-        for item in self._store.read_all():
-            if item.get("idempotency_key") == key:
-                return transaccion_from_dict(item)
+        for t in self._items.values():
+            if t.idempotency_key == key:
+                return t
         return None
 
     def list_all(
@@ -45,35 +29,34 @@ class JsonTransaccionRepository(TransaccionRepository):
         skip: int = 0,
         limit: int = 50,
     ) -> List[Transaccion]:
-        items = self._store.read_all()
+        items = list(self._items.values())
         if cuenta_id:
             items = [
-                i
-                for i in items
-                if i["cuenta_id"] == cuenta_id
-                or i.get("cuenta_destino_id") == cuenta_id
+                t
+                for t in items
+                if t.cuenta_id == cuenta_id or t.cuenta_destino_id == cuenta_id
             ]
         if tipo:
-            items = [i for i in items if i["tipo"] == tipo.value]
-        items = sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
-        return [transaccion_from_dict(i) for i in items[skip : skip + limit]]
+            items = [t for t in items if t.tipo == tipo]
+        items.sort(key=lambda t: t.created_at, reverse=True)
+        return items[skip : skip + limit]
 
     def count(
         self,
         cuenta_id: Optional[str] = None,
         tipo: Optional[TipoTransaccion] = None,
     ) -> int:
-        items = self._store.read_all()
+        items = list(self._items.values())
         if cuenta_id:
             items = [
-                i
-                for i in items
-                if i["cuenta_id"] == cuenta_id
-                or i.get("cuenta_destino_id") == cuenta_id
+                t
+                for t in items
+                if t.cuenta_id == cuenta_id or t.cuenta_destino_id == cuenta_id
             ]
         if tipo:
-            items = [i for i in items if i["tipo"] == tipo.value]
+            items = [t for t in items if t.tipo == tipo]
         return len(items)
 
     def bulk_insert(self, transacciones: List[Transaccion]) -> None:
-        self._store.write_all([transaccion_to_dict(t) for t in transacciones])
+        for t in transacciones:
+            self._items[t.id] = t

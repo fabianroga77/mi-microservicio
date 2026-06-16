@@ -38,6 +38,6 @@ def info():
         "env": settings.app_env,
         "python_version": platform.python_version(),
         "os": platform.system(),
-        "data_dir": str(settings.data_dir),
+        "storage": "memory",
         "uptime_seconds": round(time.time() - _start_time, 1),
     }

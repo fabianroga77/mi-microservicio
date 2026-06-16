@@ -1,4 +1,4 @@
-# Deployment: le dice a K8S cuantos pods correr y con que imagen
+# Deployment stateless — sin PVC, varias replicas, rolling update real
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,18 +34,13 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.env.APP_ENV | quote }}
-            - name: DATA_DIR
-              value: {{ .Values.persistence.mountPath | quote }}
+            - name: APP_VERSION
+              value: {{ .Values.env.APP_VERSION | quote }}
           {{- if .Values.lifecycle.preStopSleep }}
           lifecycle:
             preStop:
               exec:
                 command: ["sleep", "{{ .Values.lifecycle.preStopSleep }}"]
-          {{- end }}
-          {{- if .Values.persistence.enabled }}
-          volumeMounts:
-            - name: data
-              mountPath: {{ .Values.persistence.mountPath }}
           {{- end }}
           readinessProbe:
             httpGet:
@@ -61,9 +56,3 @@ spec:
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.persistence.enabled }}
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "mi-microservicio.fullname" . }}-data
-      {{- end }}

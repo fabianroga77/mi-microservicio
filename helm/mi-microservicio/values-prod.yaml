@@ -1,24 +1,12 @@
-# Override para probar config de produccion a mano
-#
-# Ojo: ArgoCD NO usa este archivo. Solo carga values.yaml.
-# Sirve si quieren hacer un helm upgrade con dos -f y ver como se veria prod
-# (mas replicas, mas recursos, APP_ENV=production).
-#
-# Ejemplo:
-#   helm upgrade --install mi-microservicio ./helm/mi-microservicio \
-#     -f helm/mi-microservicio/values.yaml \
-#     -f helm/mi-microservicio/values-prod.yaml \
-#     --namespace mi-microservicio
-
-# Con PVC (ReadWriteOnce) conviene 1 replica — varios pods compiten por el mismo volumen
-replicaCount: 1
+# Override manual para prod (ArgoCD no lo carga)
+replicaCount: 2
 
 image:
-  # tiene que ser un tag que exista en ghcr (latest o un SHA que haya publicado el CI)
   tag: "latest"
 
 env:
   APP_ENV: "production"
+  APP_VERSION: "2.1.0"
 
 resources:
   limits:

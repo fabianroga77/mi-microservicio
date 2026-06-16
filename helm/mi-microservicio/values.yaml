@@ -4,24 +4,21 @@
 #   - helm install/upgrade (si lo corres a mano)
 #   - ArgoCD (lee values.yaml del repo)
 #   - el CI (actualiza el tag de la imagen despues de cada build)
-#
-# Para prod manual ver values-prod.yaml — ArgoCD no lo carga solo.
 
-replicaCount: 1
+# 2 replicas stateless — rolling update sin pelear por volumenes
+replicaCount: 2
 
 image:
-  # imagen que publica el pipeline en ghcr.io
   repository: ghcr.io/fabianroga77/mi-microservicio
   pullPolicy: IfNotPresent
-  # el CI sobrescribe esto con el SHA del commit; no editar a mano salvo la primera vez
+  # el CI sobrescribe esto con el SHA del commit
   tag: "f1bc84c"
 
 service:
   type: ClusterIP
-  port: 80           # puerto del Service dentro del cluster
-  targetPort: 8000   # puerto donde escucha uvicorn en el contenedor
+  port: 80
+  targetPort: 8000
 
-# Ingress — acceso tipo produccion (URL fija, no port-forward)
 ingress:
   enabled: true
   className: nginx
@@ -32,31 +29,22 @@ ingress:
         - path: /
           pathType: Prefix
 
-# Rolling update: con PVC ReadWriteOnce solo un pod monta el disco a la vez
+# Zero-downtime: sube pod nuevo antes de tumbar el viejo (posible con stateless)
 strategy:
   type: RollingUpdate
   rollingUpdate:
-    maxSurge: 0
-    maxUnavailable: 1
+    maxSurge: 1
+    maxUnavailable: 0
 
-# Tiempo para cerrar conexiones antes de matar el pod
 terminationGracePeriodSeconds: 30
 lifecycle:
   preStopSleep: 5
 
 env:
-  # llega a la app como variable de entorno APP_ENV
   APP_ENV: "development"
-
-# PVC para que los JSON de clientes/cuentas/transacciones sobrevivan reinicios del pod
-persistence:
-  enabled: true
-  size: 1Gi
-  accessMode: ReadWriteOnce
-  mountPath: /app/data
+  APP_VERSION: "2.1.0"
 
 resources:
-  # limites del pod — en Minikube con poca RAM conviene dejarlo bajo
   limits:
     cpu: 200m
     memory: 256Mi
@@ -64,17 +52,16 @@ resources:
     cpu: 100m
     memory: 128Mi
 
-# Kubernetes llama a /health cada X segundos para saber si el pod esta bien
 livenessProbe:
   httpGet:
     path: /health
     port: 8000
-  initialDelaySeconds: 10   # espera antes del primer chequeo (la app tarda en arrancar)
-  periodSeconds: 30         # si falla, K8S reinicia el pod
+  initialDelaySeconds: 10
+  periodSeconds: 30
 
 readinessProbe:
   httpGet:
     path: /health
     port: 8000
   initialDelaySeconds: 5
-  periodSeconds: 10           # si falla, K8S no le manda trafico hasta que responda
+  periodSeconds: 10

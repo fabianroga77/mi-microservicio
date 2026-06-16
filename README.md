@@ -2,7 +2,7 @@
 
 Microservicio bancario desplegado con: **Docker → Helm → Kubernetes → ArgoCD → GitHub Actions**.
 
-Simula operaciones de un banco (clientes, cuentas, transacciones en COP) sin base de datos — los datos viven en archivos JSON montados en un **PVC** dentro del cluster.
+Simula un banco (clientes, cuentas, transacciones en COP). **Stateless**: datos en memoria, pensado para CI/CD, rolling update y varias replicas sin pelear por discos.
 
 **Autores:** Jorge Eliecer Rojas, Juan Esteban Gomez, Fabian Andres Rojas, Juan Velez, David Panesso  
 **Curso:** Arquitectura de Software — Universidad de La Sabana
@@ -11,34 +11,64 @@ Simula operaciones de un banco (clientes, cuentas, transacciones en COP) sin bas
 
 ## Que es esto
 
-Es un backend estilo banco con API REST y Swagger. Cuando alguien hace push a `main`, GitHub Actions construye la imagen Docker, actualiza Helm y ArgoCD despliega solo en Kubernetes.
+Backend bancario con API REST y Swagger. Push a `main` dispara un pipeline que:
 
-No usamos PostgreSQL ni nada parecido. La persistencia es local (JSON) pero en K8S va en un volumen persistente para que los datos no se pierdan si el pod se reinicia.
+1. Ejecuta **tests** y valida el chart Helm
+2. Construye y publica la **imagen Docker** en ghcr.io
+3. Actualiza el **tag** en `values.yaml`
+4. **ArgoCD** despliega en Kubernetes con rolling update (sin tumbar todo)
+
+---
+
+## Pipeline CI/CD completo
+
+```mermaid
+flowchart TB
+    A[git push main] --> B{commit tiene skip ci?}
+    B -->|No| C[Job 1: Test]
+    C --> C1[Smoke tests API]
+    C --> C2[helm lint + template]
+    C1 --> D[Job 2: Build and Push]
+    C2 --> D
+    D --> D1[Imagen ghcr.io:SHA]
+    D1 --> E[Job 3: Update Helm Tag]
+    E --> E1[Commit values.yaml]
+    E1 --> F[ArgoCD sync]
+    F --> G[Rolling update 2 replicas]
+    G --> H[Ingress banking.local]
+    B -->|Si| X[Pipeline omitido]
+```
+
+| Job | Que hace |
+|-----|----------|
+| **Test** | `/health`, clientes seed, transferencia de prueba, `helm lint` |
+| **Build & Push** | Docker build → `ghcr.io/usuario/mi-microservicio:SHA` |
+| **Update Helm Tag** | Commit automatico del tag en `values.yaml` con `[skip ci]` |
+
+Disparo manual: pestaña **Actions** → **Run workflow** (`workflow_dispatch`).
 
 ---
 
 ## Arquitectura hexagonal
 
-Separamos el codigo en capas para que el dominio no dependa de FastAPI ni de donde se guardan los datos:
-
 ```
 app/
-├── domain/              Entidades, enums, excepciones, ports (interfaces)
-├── application/         Casos de uso (logica de negocio)
+├── domain/              Entidades, enums, excepciones, ports
+├── application/         Casos de uso
 ├── infrastructure/
-│   ├── persistence/     Repositorios JSON
-│   ├── seed/            Datos de ejemplo al primer arranque
-│   └── web/             Routers FastAPI, schemas, mappers
-└── main.py              Punto de entrada (composition root)
+│   ├── persistence/     Repositorios en memoria
+│   ├── seed/            Datos de ejemplo al arrancar cada pod
+│   └── web/             FastAPI (routers, schemas)
+└── main.py
 ```
 
-**Flujo:** Router → Caso de uso → Repositorio → archivo JSON
+**Flujo:** Router → Caso de uso → Repositorio en memoria
 
 ---
 
 ## Modulos de la API
 
-Swagger completo en `/docs` (probar ahi primero).
+Swagger en `/docs`.
 
 ### Clientes — `/api/v1/clientes`
 
@@ -68,30 +98,25 @@ Swagger completo en `/docs` (probar ahi primero).
 | GET | `/transacciones` | Historial (filtros) |
 | GET | `/transacciones/{id}` | Detalle |
 
-Transferencias aceptan header opcional `X-Idempotency-Key` para no duplicar la misma operacion.
-
 ### Sistema
 
 | Metodo | Ruta | Descripcion |
 |--------|------|-------------|
 | GET | `/` | Info del servicio |
 | GET | `/health` | Health check (K8S probes) |
-| GET | `/info` | Runtime + ruta de datos |
+| GET | `/info` | Runtime del pod |
 | GET | `/docs` | Swagger UI |
+
+IDs seed: `seed-cliente-001`, `seed-cuenta-001`, `seed-cuenta-002`, `seed-cuenta-003`
 
 ---
 
-## Reglas de negocio
+## Stateless (sin JSON ni PVC)
 
-- Montos en **COP**, sin saldo negativo
-- Cuentas **bloqueadas** o **cerradas** no mueven dinero
-- Transferencias debitan origen y acreditan destino juntos
-- Documento de cliente unico (no duplicados)
-- Al primer arranque carga **datos seed** (2 clientes, 3 cuentas) para probar rapido
-
-IDs seed utiles en Swagger:
-- Cliente: `seed-cliente-001`
-- Cuentas: `seed-cuenta-001`, `seed-cuenta-002`, `seed-cuenta-003`
+- Cada pod tiene su **propia memoria** con datos seed al arrancar
+- Al hacer deploy los datos **no persisten** (como muchos servicios stateless de verdad)
+- Ventaja: **2 replicas**, rolling update `maxSurge: 1` / `maxUnavailable: 0` → casi sin corte
+- En un banco real el siguiente paso seria PostgreSQL; aqui priorizamos el flujo DevOps
 
 ---
 
@@ -99,219 +124,89 @@ IDs seed utiles en Swagger:
 
 ```
 mi-microservicio/
-├── app/                         Codigo fuente (hexagonal)
-├── requirements.txt
+├── app/
 ├── Dockerfile
 ├── helm/mi-microservicio/
-│   ├── values.yaml              Config + PVC
-│   ├── values-prod.yaml         Override manual (ArgoCD no lo usa)
+│   ├── values.yaml
 │   └── templates/
 │       ├── deployment.yaml
 │       ├── service.yaml
-│       ├── ingress.yaml         Entrada HTTP (tipo produccion)
-│       └── pvc.yaml             Volumen persistente para /app/data
+│       └── ingress.yaml
 ├── argocd/application.yaml
 └── .github/workflows/ci.yml
 ```
 
 ---
 
-## Probar en local (sin K8S)
-
-Desde la raiz del repo:
+## Probar en local
 
 ```powershell
 cd app
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r ..\requirements.txt
-$env:DATA_DIR = "..\data"
 uvicorn main:app --reload --port 8000
 ```
 
-Abrir `http://localhost:8000/docs`
-
-Los JSON se guardan en `./data/` (ignorado por git).
+`http://localhost:8000/docs`
 
 ---
 
-## Docker local
+## Kubernetes con Minikube
 
-```powershell
-docker build -t mi-microservicio:local .
-docker run -p 8000:8000 -v ${PWD}/data:/app/data mi-microservicio:local
-```
-
----
-
-## Kubernetes con Minikube (acceso tipo produccion)
-
-En produccion el usuario no usa `port-forward`. El trafico entra por un **Ingress** que apunta al **Service**, y el Service solo manda trafico a pods que pasan `/health`.
-
-```mermaid
-flowchart LR
-    U[Usuario / Swagger] --> ING[Ingress<br/>banking.local]
-    ING --> SVC[Service ClusterIP :80]
-    SVC --> POD[Pod FastAPI :8000]
-    POD --> PVC[(PVC /app/data)]
-```
-
-**Ventaja:** cuando ArgoCD despliega una version nueva, el Ingress sigue apuntando al Service. Cuando el pod nuevo esta listo, el trafico cambia solo. **No hay que reiniciar nada en tu PC** (a diferencia del port-forward).
-
-### 1. Arrancar cluster
+### 1. Cluster + Ingress
 
 ```powershell
 minikube start
-```
-
-### 2. Habilitar Ingress (solo la primera vez)
-
-```powershell
 minikube addons enable ingress
-kubectl get pods -n ingress-nginx
 ```
 
-Espera que el controller nginx este `Running`.
-
-### 3. Instalar / actualizar con Helm
+### 2. Helm
 
 ```powershell
 helm upgrade --install mi-microservicio ./helm/mi-microservicio `
   --namespace mi-microservicio --create-namespace
 ```
 
-Crea: Deployment, Service, Ingress y PVC.
+Verificar 2 replicas:
 
 ```powershell
-kubectl get pods,ingress,pvc -n mi-microservicio
+kubectl get pods -n mi-microservicio
 ```
 
-### 4. Configurar el host local (solo una vez)
+### 3. Hosts
 
-Obtener IP de Minikube:
-
-```powershell
-minikube ip
-```
-
-Agregar en `C:\Windows\System32\drivers\etc\hosts` (como administrador):
+`minikube ip` → agregar en `C:\Windows\System32\drivers\etc\hosts`:
 
 ```
-<IP_DE_MINIKUBE>  banking.local
+<IP>  banking.local
 ```
 
-Ejemplo: `192.168.49.2  banking.local`
+### 4. Swagger
 
-### 5. Abrir la API
+**http://banking.local/docs**
 
-Swagger: **http://banking.local/docs**
-
-```powershell
-curl http://banking.local/health
-curl http://banking.local/api/v1/clientes
-```
-
-Tras un deploy de ArgoCD, solo recarga el navegador (`Ctrl + Shift + R`). El Ingress no se cae como el port-forward.
+Tras un deploy de ArgoCD solo recarga el navegador. El Ingress no se cae como el port-forward.
 
 ---
 
-### Port-forward (solo debug, no es produccion)
-
-Util si no quieres tocar el archivo hosts:
-
-```powershell
-kubectl port-forward svc/mi-microservicio-mi-microservicio 8080:80 -n mi-microservicio
-```
-
-Swagger: `http://localhost:8080/docs`
-
-> **Ojo:** el port-forward se engancha a un pod concreto. Si ArgoCD reinicia el pod, **se corta** y hay que ejecutarlo otra vez. Por eso en prod se usa Ingress.
-
----
-
-### Despliegue sin caida total (rolling update)
-
-El chart usa:
-
-```yaml
-strategy:
-  rollingUpdate:
-    maxSurge: 0
-    maxUnavailable: 1
-```
-
-Con **1 replica + PVC ReadWriteOnce** no podemos tener dos pods montando el mismo disco. Kubernetes reemplaza el pod de forma controlada y el `preStop` espera 5s antes de apagarlo.
-
-Puede haber **unos segundos** sin respuesta durante el cambio. Eso es normal con JSON en un solo volumen. En un banco real usarias **base de datos + varias replicas** para cero downtime.
-
----
-
-## ArgoCD (GitOps)
-
-Igual que antes — ArgoCD vigila el repo y sincroniza cuando cambia `values.yaml` (incluido el tag de la imagen que actualiza el CI).
+## ArgoCD
 
 ```powershell
 kubectl apply -f ./argocd/application.yaml
 ```
 
-Estados esperados: **Synced** + **Healthy**
+Estado esperado: **Synced** + **Healthy**
 
 ---
 
-## CI/CD (GitHub Actions)
+## Version de la app
 
-Push a `main` → build imagen → push a `ghcr.io` → commit del nuevo tag en `values.yaml` → ArgoCD despliega.
-
-El commit del CI lleva `[skip ci]` para no entrar en loop.
-
----
-
-## Persistencia (PVC)
-
-Los archivos viven en `/app/data/` dentro del contenedor:
-
-```
-clientes.json
-cuentas.json
-transacciones.json
-```
-
-Con PVC los datos **sobreviven** reinicios del pod. Sin PVC (solo local) se pierden al borrar el contenedor.
-
-> Nota: el PVC es `ReadWriteOnce`, o sea **1 replica**. Si subes replicas en prod, cada pod necesitaria su propio volumen o una BD real.
-
----
-
-## values-prod.yaml
-
-Override manual para probar mas recursos y `APP_ENV=production`. **ArgoCD no lo carga** — solo `values.yaml`.
-
-```powershell
-helm upgrade --install mi-microservicio ./helm/mi-microservicio `
-  -f helm/mi-microservicio/values.yaml `
-  -f helm/mi-microservicio/values-prod.yaml `
-  --namespace mi-microservicio
-```
-
----
-
-## Ejemplos rapidos (curl)
-
-Con Ingress (recomendado):
-
-```powershell
-curl http://banking.local/api/v1/clientes
-curl http://banking.local/api/v1/cuentas/seed-cuenta-001
-curl -X POST http://banking.local/api/v1/transacciones/transferencia `
-  -H "Content-Type: application/json" `
-  -d '{"cuenta_origen_id":"seed-cuenta-001","cuenta_destino_id":"seed-cuenta-002","monto":50000}'
-```
-
-Con port-forward (si usas localhost:8080):
-
-```powershell
-curl http://localhost:8080/api/v1/clientes
-```
+| Donde | Para que |
+|-------|----------|
+| `values.yaml` → `env.APP_VERSION` | Swagger + `/info` en el cluster |
+| `helm/.../Chart.yaml` → `appVersion` | Metadata del chart |
+| `image.tag` en `values.yaml` | Lo actualiza el **CI** (SHA del commit) — no tocar a mano |
 
 ---
 
@@ -319,26 +214,20 @@ curl http://localhost:8080/api/v1/clientes
 
 ```powershell
 kubectl get pods,ingress -n mi-microservicio
-kubectl logs -n mi-microservicio -l app.kubernetes.io/name=mi-microservicio
+kubectl logs -n mi-microservicio -l app.kubernetes.io/name=mi-microservicio --tail=50
 helm upgrade mi-microservicio ./helm/mi-microservicio --namespace mi-microservicio
-minikube ip
-```
-
-Debug con port-forward (opcional):
-
-```powershell
-kubectl port-forward svc/mi-microservicio-mi-microservicio 8080:80 -n mi-microservicio
+curl http://banking.local/health
 ```
 
 ---
 
-## Errores comunes de la API
+## Errores comunes
 
 | Codigo | Significado |
 |--------|-------------|
-| 404 | Cliente, cuenta o transaccion no existe |
+| 404 | Recurso no existe |
 | 409 | Documento duplicado o idempotency key repetida |
 | 422 | Saldo insuficiente |
-| 400 | Cuenta bloqueada/cerrada u otra regla de negocio |
+| 400 | Cuenta bloqueada/cerrada |
 
-Respuesta tipo: `{"code": "saldo_insuficiente", "message": "..."}`
+Si el pipeline falla en **Test**, no se publica imagen. Revisa la pestaña Actions en GitHub.

@@ -13,7 +13,7 @@ Arquitectura hexagonal:
   application/  casos de uso
   infrastructure/  FastAPI + persistencia JSON
 
-Persistencia en archivos JSON (DATA_DIR). Sin base de datos.
+Persistencia en memoria (stateless). Sin base de datos.
 """
 
 from contextlib import asynccontextmanager
@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
         description=(
             "API de banco simulado para el trabajo de Arquitectura de Software. "
             "Gestiona clientes, cuentas (ahorros/corriente) y transacciones en COP. "
-            "Los datos se guardan en JSON local (PVC en Kubernetes)."
+            "Stateless: datos en memoria por pod, pensado para CI/CD y alta disponibilidad."
         ),
         version=settings.app_version,
         lifespan=lifespan,

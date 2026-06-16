@@ -2,47 +2,32 @@ from typing import List, Optional
 
 from domain.models.cliente import Cliente
 from domain.ports.cliente_repository import ClienteRepository
-from infrastructure.persistence.json_store import JsonStore
-from infrastructure.persistence.serializers import cliente_from_dict, cliente_to_dict
 
 
-class JsonClienteRepository(ClienteRepository):
-    def __init__(self, store: JsonStore):
-        self._store = store
+class MemoryClienteRepository(ClienteRepository):
+    def __init__(self) -> None:
+        self._items: dict[str, Cliente] = {}
 
     def save(self, cliente: Cliente) -> Cliente:
-        data = cliente_to_dict(cliente)
-
-        def mutator(items):
-            updated = [data if i["id"] == cliente.id else i for i in items]
-            if not any(i["id"] == cliente.id for i in items):
-                updated.append(data)
-            return updated
-
-        self._store.update(mutator)
+        self._items[cliente.id] = cliente
         return cliente
 
     def find_by_id(self, cliente_id: str) -> Optional[Cliente]:
-        for item in self._store.read_all():
-            if item["id"] == cliente_id:
-                return cliente_from_dict(item)
-        return None
+        return self._items.get(cliente_id)
 
     def find_by_documento(self, documento: str) -> Optional[Cliente]:
-        for item in self._store.read_all():
-            if item["documento"] == documento:
-                return cliente_from_dict(item)
+        for c in self._items.values():
+            if c.documento == documento:
+                return c
         return None
 
     def list_all(self, skip: int = 0, limit: int = 50) -> List[Cliente]:
-        items = sorted(
-            self._store.read_all(),
-            key=lambda x: x.get("created_at", ""),
-        )
-        return [cliente_from_dict(i) for i in items[skip : skip + limit]]
+        items = sorted(self._items.values(), key=lambda c: c.created_at)
+        return items[skip : skip + limit]
 
     def count(self) -> int:
-        return len(self._store.read_all())
+        return len(self._items)
 
     def bulk_insert(self, clientes: List[Cliente]) -> None:
-        self._store.write_all([cliente_to_dict(c) for c in clientes])
+        for c in clientes:
+            self._items[c.id] = c

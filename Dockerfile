@@ -1,6 +1,3 @@
-# Imagen Docker del microservicio bancario
-# Build local: docker build -t mi-microservicio:local .
-
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -9,11 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ .
-
-# carpeta donde se guardan los JSON (en K8S se monta un PVC aqui)
-RUN mkdir -p /app/data
-
-ENV DATA_DIR=/app/data
 
 EXPOSE 8000
 
