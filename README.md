@@ -108,6 +108,7 @@ mi-microservicio/
 │   └── templates/
 │       ├── deployment.yaml
 │       ├── service.yaml
+│       ├── ingress.yaml         Entrada HTTP (tipo produccion)
 │       └── pvc.yaml             Volumen persistente para /app/data
 ├── argocd/application.yaml
 └── .github/workflows/ci.yml
@@ -143,7 +144,19 @@ docker run -p 8000:8000 -v ${PWD}/data:/app/data mi-microservicio:local
 
 ---
 
-## Kubernetes con Minikube
+## Kubernetes con Minikube (acceso tipo produccion)
+
+En produccion el usuario no usa `port-forward`. El trafico entra por un **Ingress** que apunta al **Service**, y el Service solo manda trafico a pods que pasan `/health`.
+
+```mermaid
+flowchart LR
+    U[Usuario / Swagger] --> ING[Ingress<br/>banking.local]
+    ING --> SVC[Service ClusterIP :80]
+    SVC --> POD[Pod FastAPI :8000]
+    POD --> PVC[(PVC /app/data)]
+```
+
+**Ventaja:** cuando ArgoCD despliega una version nueva, el Ingress sigue apuntando al Service. Cuando el pod nuevo esta listo, el trafico cambia solo. **No hay que reiniciar nada en tu PC** (a diferencia del port-forward).
 
 ### 1. Arrancar cluster
 
@@ -151,28 +164,85 @@ docker run -p 8000:8000 -v ${PWD}/data:/app/data mi-microservicio:local
 minikube start
 ```
 
-### 2. Instalar con Helm
+### 2. Habilitar Ingress (solo la primera vez)
+
+```powershell
+minikube addons enable ingress
+kubectl get pods -n ingress-nginx
+```
+
+Espera que el controller nginx este `Running`.
+
+### 3. Instalar / actualizar con Helm
 
 ```powershell
 helm upgrade --install mi-microservicio ./helm/mi-microservicio `
   --namespace mi-microservicio --create-namespace
 ```
 
-Esto crea el Deployment, Service y un **PVC de 1Gi** montado en `/app/data`.
-
-Verificar:
+Crea: Deployment, Service, Ingress y PVC.
 
 ```powershell
-kubectl get pods,pvc -n mi-microservicio
+kubectl get pods,ingress,pvc -n mi-microservicio
 ```
 
-### 3. Port-forward
+### 4. Configurar el host local (solo una vez)
+
+Obtener IP de Minikube:
+
+```powershell
+minikube ip
+```
+
+Agregar en `C:\Windows\System32\drivers\etc\hosts` (como administrador):
+
+```
+<IP_DE_MINIKUBE>  banking.local
+```
+
+Ejemplo: `192.168.49.2  banking.local`
+
+### 5. Abrir la API
+
+Swagger: **http://banking.local/docs**
+
+```powershell
+curl http://banking.local/health
+curl http://banking.local/api/v1/clientes
+```
+
+Tras un deploy de ArgoCD, solo recarga el navegador (`Ctrl + Shift + R`). El Ingress no se cae como el port-forward.
+
+---
+
+### Port-forward (solo debug, no es produccion)
+
+Util si no quieres tocar el archivo hosts:
 
 ```powershell
 kubectl port-forward svc/mi-microservicio-mi-microservicio 8080:80 -n mi-microservicio
 ```
 
 Swagger: `http://localhost:8080/docs`
+
+> **Ojo:** el port-forward se engancha a un pod concreto. Si ArgoCD reinicia el pod, **se corta** y hay que ejecutarlo otra vez. Por eso en prod se usa Ingress.
+
+---
+
+### Despliegue sin caida total (rolling update)
+
+El chart usa:
+
+```yaml
+strategy:
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+```
+
+Con **1 replica + PVC ReadWriteOnce** no podemos tener dos pods montando el mismo disco. Kubernetes reemplaza el pod de forma controlada y el `preStop` espera 5s antes de apagarlo.
+
+Puede haber **unos segundos** sin respuesta durante el cambio. Eso es normal con JSON en un solo volumen. En un banco real usarias **base de datos + varias replicas** para cero downtime.
 
 ---
 
@@ -227,17 +297,20 @@ helm upgrade --install mi-microservicio ./helm/mi-microservicio `
 
 ## Ejemplos rapidos (curl)
 
+Con Ingress (recomendado):
+
 ```powershell
-# Listar clientes seed
-curl http://localhost:8080/api/v1/clientes
-
-# Ver saldo de una cuenta
-curl http://localhost:8080/api/v1/cuentas/seed-cuenta-001
-
-# Transferencia
-curl -X POST http://localhost:8080/api/v1/transacciones/transferencia `
+curl http://banking.local/api/v1/clientes
+curl http://banking.local/api/v1/cuentas/seed-cuenta-001
+curl -X POST http://banking.local/api/v1/transacciones/transferencia `
   -H "Content-Type: application/json" `
   -d '{"cuenta_origen_id":"seed-cuenta-001","cuenta_destino_id":"seed-cuenta-002","monto":50000}'
+```
+
+Con port-forward (si usas localhost:8080):
+
+```powershell
+curl http://localhost:8080/api/v1/clientes
 ```
 
 ---
@@ -245,10 +318,16 @@ curl -X POST http://localhost:8080/api/v1/transacciones/transferencia `
 ## Comandos utiles
 
 ```powershell
-kubectl get pods -n mi-microservicio
+kubectl get pods,ingress -n mi-microservicio
 kubectl logs -n mi-microservicio -l app.kubernetes.io/name=mi-microservicio
-kubectl port-forward svc/mi-microservicio-mi-microservicio 8080:80 -n mi-microservicio
 helm upgrade mi-microservicio ./helm/mi-microservicio --namespace mi-microservicio
+minikube ip
+```
+
+Debug con port-forward (opcional):
+
+```powershell
+kubectl port-forward svc/mi-microservicio-mi-microservicio 8080:80 -n mi-microservicio
 ```
 
 ---

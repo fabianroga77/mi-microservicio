@@ -7,6 +7,13 @@ metadata:
     {{- include "mi-microservicio.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: {{ .Values.strategy.type }}
+    {{- if eq .Values.strategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.strategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.strategy.rollingUpdate.maxUnavailable }}
+    {{- end }}
   selector:
     matchLabels:
       {{- include "mi-microservicio.selectorLabels" . | nindent 6 }}
@@ -15,6 +22,7 @@ spec:
       labels:
         {{- include "mi-microservicio.selectorLabels" . | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -28,6 +36,12 @@ spec:
               value: {{ .Values.env.APP_ENV | quote }}
             - name: DATA_DIR
               value: {{ .Values.persistence.mountPath | quote }}
+          {{- if .Values.lifecycle.preStopSleep }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.lifecycle.preStopSleep }}"]
+          {{- end }}
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: data

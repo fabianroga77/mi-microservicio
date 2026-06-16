@@ -1,5 +1,4 @@
-# Service: expone los pods dentro del cluster
-# El port-forward del README va a este Service (puerto 80) -> contenedor (8000)
+# Service: balancea trafico entre pods sanos (Ingress apunta aqui)
 apiVersion: v1
 kind: Service
 metadata:

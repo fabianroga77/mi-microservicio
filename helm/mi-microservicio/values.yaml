@@ -21,6 +21,29 @@ service:
   port: 80           # puerto del Service dentro del cluster
   targetPort: 8000   # puerto donde escucha uvicorn en el contenedor
 
+# Ingress — acceso tipo produccion (URL fija, no port-forward)
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: banking.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Rolling update: con PVC ReadWriteOnce solo un pod monta el disco a la vez
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
+# Tiempo para cerrar conexiones antes de matar el pod
+terminationGracePeriodSeconds: 30
+lifecycle:
+  preStopSleep: 5
+
 env:
   # llega a la app como variable de entorno APP_ENV
   APP_ENV: "development"
