@@ -12,7 +12,7 @@ image:
   repository: ghcr.io/fabianroga77/mi-microservicio
   pullPolicy: IfNotPresent
   # el CI sobrescribe esto con el SHA del commit; no editar a mano salvo la primera vez
-  tag: "94eb5f1"
+  tag: "51997b1"
 
 service:
   type: ClusterIP
