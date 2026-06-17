@@ -1,4 +1,4 @@
-""" from decimal import Decimal
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Query
@@ -53,4 +53,3 @@ def cambiar_estado_cuenta(cuenta_id: str, body: CuentaEstadoRequest):
     """Activa, bloquea o cierra una cuenta."""
     cuenta = get_container().cuenta_uc.cambiar_estado(cuenta_id, body.estado)
     return to_cuenta_response(cuenta)
- """
