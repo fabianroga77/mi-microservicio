@@ -24,7 +24,7 @@ from infrastructure.config import get_settings
 from infrastructure.web.dependencies import init_app
 from infrastructure.web.exception_handlers import register_exception_handlers
 from infrastructure.web.routers import clientes, sistema, transacciones
-# from infrastructure.web.routers import cuentas
+from infrastructure.web.routers import cuentas
 
 
 @asynccontextmanager
@@ -52,7 +52,7 @@ def create_app() -> FastAPI:
 
     app.include_router(sistema.router)
     app.include_router(clientes.router)
-    #app.include_router(cuentas.router)
+    app.include_router(cuentas.router)
     app.include_router(transacciones.router)
 
     return app
